@@ -1,59 +1,114 @@
-# mesh-interpolation-tools
+# Mesh Interpolation Tools
 
-A Python package for **conservative interpolation** of scalar fields between triangular meshes and structured grids.  
-The package supports:
-- Interpolation from **triangular mesh → rectangular grid** (uniform or non-uniform cell sizes).  
-- Interpolation from **triangular mesh → triangular mesh**.  
-- Extension to spherical meshes and HEALPix.  
-
-This package is useful for geophysics, climate/ocean modeling, and numerical methods where conservation of scalar fields is required.
+Conservative interpolation routines for mapping fields between triangular meshes, structured grids, and HEALPix spherical grids.
+This package is designed for geophysical and climate applications where flux conservation is essential.
 
 ---
 
-## Features
-- **Conservative interpolation**: preserves integrals of the field.
-- **Adaptive subdivision**: triangles subdivide until smaller than grid cells.
-- **Non-uniform grids**: handles irregular spacing in structured grids.
-- **Mesh-to-mesh**: interpolate from one triangular mesh to another.
+## ✨ Features
+
+* **Triangular → Regular grid** (`tri2reg`)
+* **Triangular → Arbitrary rectangular grid** (`tri2arb`)
+* **Triangular → Triangular mesh** (`tri2tri`)
+* **Spherical triangular mesh → HEALPix** (`tri2healpix`)
+
+All methods conserve integrals of the interpolated field.
 
 ---
 
-## Installation
+## 📦 Installation
 
-Clone the repository and install dependencies:
+Clone the repository and install locally:
 
 ```bash
-git clone https://github.com/aleksei-semenov/mesh-interpolation-tools.git
-cd mesh-interpolation-tools
-pip install -r requirements.txt
+git clone https://github.com/aleksei-semenov/mesh_interpolation_tools.git
+cd mesh_interpolation_tools
+pip install -e .
 ```
 
-## Usage example
+This uses the `src/` layout, so the package is found correctly.
+
+Dependencies are listed in `requirements.txt` and will be installed automatically.
+
+---
+
+## 🚀 Usage
+
+### 1. Triangular → Regular grid
 
 ```python
 import numpy as np
-from scipy.spatial import Delaunay
-from meshinterp import adaptive_conservative_interpolation
+from mesh_interpolation_tools.tri2reg import tri2reg
 
-# Generate a triangular mesh
-points = np.random.rand(50, 2)
-tri = Delaunay(points)
-triangles = tri.simplices
-values = np.sin(2*np.pi*points[:,0]) * np.cos(2*np.pi*points[:,1])
+# Example triangular mesh (nodes, elements, field)
+nodes = np.random.rand(2, 10)
+elem = np.array([[0, 1, 2], [2, 3, 4]]).T
+field = np.random.rand(10)
 
-# Interpolate to structured grid
-gx = np.linspace(0, 1, 30)
-gy = np.linspace(0, 1, 20)
-gx, gy, heatmap = adaptive_conservative_interpolation(points, triangles, values,
-                                                      grid_x=gx, grid_y=gy)
+# Structured grid axes
+grid_x = np.linspace(0, 1, 50)
+grid_y = np.linspace(0, 1, 50)
 
-print("Interpolated heatmap shape:", heatmap.shape)
+grid_x, grid_y, heatmap = tri2reg(nodes, elem, field, grid_x, grid_y)
 ```
 
-## Requirements
+---
 
-numpy
+### 2. Triangular → Arbitrary grid
 
-scipy
+```python
+from mesh_interpolation_tools.tri2arb import tri2arb
 
-matplotlib
+grid_x = np.array([0, 0.1, 0.4, 1.0])  # non-uniform
+grid_y = np.array([0, 0.2, 0.5, 1.0])
+
+grid_x, grid_y, heatmap = tri2arb(nodes, elem, field, grid_x, grid_y)
+```
+
+---
+
+### 3. Triangular → Triangular mesh
+
+```python
+from mesh_interpolation_tools.tri2tri import conservative_interp_tri2tri
+
+field_tgt = conservative_interp_tri2tri(nodes, elem, field, nodes, elem)
+```
+
+---
+
+### 4. Spherical triangular mesh → HEALPix
+
+```python
+from mesh_interpolation_tools.tri2healpix import conservative_interp_spherical_tri2healpix
+
+healpix_map = conservative_interp_spherical_tri2healpix(nodes, elem, field, nside=32)
+```
+
+---
+
+## 📚 Examples
+
+Interactive Jupyter notebooks are available in the [`examples/`](./examples) folder:
+
+* `tri2reg_example.ipynb` – triangular → regular grid
+* `tri2arb_example.ipynb` – triangular → arbitrary rectangular grid
+* `tri2tri_example.ipynb` – triangular → triangular mesh
+* `tri2healpix_example.ipynb` – spherical triangular mesh → HEALPix
+
+To run:
+
+```bash
+cd examples
+jupyter notebook
+```
+
+---
+
+## 🧪 Tests
+
+Tests will be located in the `tests/` folder. To run:
+
+```bash
+pytest
+```
