@@ -105,7 +105,7 @@ jupyter notebook
 
 ---
 
-## 🧪 Tests
+## Tests
 
 Tests will be located in the `tests/` folder. To run:
 
