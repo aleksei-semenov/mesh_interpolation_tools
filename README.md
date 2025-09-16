@@ -5,7 +5,7 @@ This package is designed for geophysical and climate applications where flux con
 
 ---
 
-## ✨ Features
+## Features
 
 * **Triangular → Regular grid** (`tri2reg`)
 * **Triangular → Arbitrary rectangular grid** (`tri2arb`)
@@ -16,7 +16,7 @@ All methods conserve integrals of the interpolated field.
 
 ---
 
-## 📦 Installation
+## Installation
 
 Clone the repository and install locally:
 
@@ -32,7 +32,7 @@ Dependencies are listed in `requirements.txt` and will be installed automaticall
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### 1. Triangular → Regular grid
 
@@ -87,7 +87,7 @@ healpix_map = conservative_interp_spherical_tri2healpix(nodes, elem, field, nsid
 
 ---
 
-## 📚 Examples
+## Examples
 
 Interactive Jupyter notebooks are available in the [`examples/`](./examples) folder:
 

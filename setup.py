@@ -4,9 +4,9 @@ setup(
     name="mesh-interpolation-tools",  # ✅ this is the PyPI/distribution name
     version="0.1.0",
     description="Conservative interpolation between triangular meshes and structured grids",
-    author="Your Name",
-    author_email="your.email@example.com",
-    url="https://github.com/YOUR_USERNAME/mesh-interpolation-tools",
+    author="Aleksei Semenov",
+    author_email="aleksei.semenov@awi.de",
+    url="https://github.com/aleksei-semenov/mesh-interpolation-tools",
     packages=find_packages(include=["mesh_interpolation_tools", "mesh_interpolation_tools.*"]),  # ✅ underscores
     install_requires=[
         "numpy",
