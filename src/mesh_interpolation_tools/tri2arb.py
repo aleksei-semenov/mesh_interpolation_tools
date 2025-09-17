@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # ----------------------------
 # Geometry helpers
@@ -61,12 +62,180 @@ def compute_required_subdivisions(triangle_vertices, target_cell_size, *, min_k=
 
 
 # ----------------------------
-# Interpolator
+# Weight calculation function for arbitrary grid
+# ----------------------------
+
+def calculate_interpolation_weights_arb(nodes, elem, grid_x=None, grid_y=None, grid_size=100, 
+                                      elem_area=None, n_processes=None):
+    """
+    Calculate interpolation weights from triangular mesh to arbitrary structured grid.
+    
+    Parameters
+    ----------
+    nodes : (2, nod_n) array
+        Node coordinates (x,y).
+    elem : (3, elem_n) array
+        Node indices for each triangular element.
+    grid_x, grid_y : 1D arrays, optional
+        Grid axes (cell boundaries).
+    grid_size : int, optional
+        Number of grid cells if grid_x or grid_y not provided.
+    elem_area : (elem_n,) array, optional
+        Precomputed element areas. If None, computed from nodes.
+    n_processes : int, optional
+        Number of processes for parallelization. Defaults to CPU count.
+        
+    Returns
+    -------
+    weights : list of tuples
+        Each tuple contains (element_index, grid_j, grid_i, weight)
+    grid_x, grid_y : 1D arrays
+        Grid axes
+    area_map : 2D array
+        Total area in each grid cell
+    """
+    node_coords = nodes.T
+    elem_conn = elem.T
+    
+    if elem_area is None:
+        elem_area = np.array([triangle_area(node_coords[tri]) for tri in elem_conn])
+
+    if grid_x is None:
+        grid_x = np.linspace(node_coords[:,0].min(), node_coords[:,0].max(), grid_size)
+    if grid_y is None:
+        grid_y = np.linspace(node_coords[:,1].min(), node_coords[:,1].max(), grid_size)
+
+    grid_x, dx_min = _prepare_axis(grid_x, "grid_x")
+    grid_y, dy_min = _prepare_axis(grid_y, "grid_y")
+    target_cell_size = min(dx_min, dy_min)
+
+    nx = len(grid_x) - 1
+    ny = len(grid_y) - 1
+    area_map = np.zeros((ny, nx), dtype=float)
+    
+    # Prepare arguments for parallel processing
+    element_args = [(e_idx, tri_idx, node_coords, elem_area, grid_x, grid_y, nx, ny, target_cell_size) 
+                    for e_idx, tri_idx in enumerate(elem_conn)]
+    
+    # Determine number of processes
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(element_args))
+    
+    # Process elements in parallel
+    weights = []
+    if n_processes > 1:
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(_process_element_weights, element_args)
+    else:
+        # Serial processing
+        results = map(_process_element_weights, element_args)
+    
+    # Combine results
+    for result in results:
+        for e_idx, j, i, weight in result:
+            weights.append((e_idx, j, i, weight))
+            area_map[j, i] += weight
+    
+    return weights, grid_x, grid_y, area_map
+
+
+def _process_element_weights(args):
+    """Process a single element to calculate interpolation weights."""
+    e_idx, tri_idx, node_coords, elem_area, grid_x, grid_y, nx, ny, target_cell_size = args
+    tri_vertices = node_coords[tri_idx]
+    A = elem_area[e_idx]
+    
+    k = compute_required_subdivisions(tri_vertices, target_cell_size)
+    centroids = subdivide_triangle_iterative(tri_vertices, k)
+    sub_area = A / len(centroids) if centroids else 0
+    
+    element_weights = []
+    for (x, y) in centroids:
+        i = np.searchsorted(grid_x, x, side='right') - 1
+        j = np.searchsorted(grid_y, y, side='right') - 1
+        if 0 <= i < nx and 0 <= j < ny:
+            element_weights.append((e_idx, j, i, sub_area))
+            
+    return element_weights
+
+
+# ----------------------------
+# Interpolation function for arbitrary grid
+# ----------------------------
+
+def apply_interpolation_weights_arb(weights, area_map, elem_conn, field_at_nodes, n_processes=None):
+    """
+    Apply precomputed interpolation weights to interpolate field values.
+    
+    Parameters
+    ----------
+    weights : list of tuples
+        Precomputed weights from calculate_interpolation_weights_arb
+    area_map : 2D array
+        Total area in each grid cell
+    elem_conn : array
+        Element connectivity
+    field_at_nodes : (nod_n,) array
+        Scalar values per node.
+    n_processes : int, optional
+        Number of processes for parallelization. Defaults to CPU count.
+        
+    Returns
+    -------
+    heatmap : 2D array
+        Interpolated field values on the grid
+    """
+    ny, nx = area_map.shape
+    heatmap = np.zeros((ny, nx), dtype=float)
+    
+    # Precompute element values
+    elem_values = np.array([field_at_nodes[tri].mean() for tri in elem_conn], dtype=float)
+    
+    # Determine number of processes
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(weights))
+    
+    # Process weights in parallel
+    if n_processes > 1:
+        # Split weights into chunks for parallel processing
+        chunk_size = len(weights) // n_processes + 1
+        weight_chunks = [weights[i:i+chunk_size] for i in range(0, len(weights), chunk_size)]
+        
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(partial(_process_weights_chunk_arb, elem_values=elem_values, grid_shape=(ny, nx)), weight_chunks)
+    else:
+        # Serial processing
+        results = [_process_weights_chunk_arb(weights, elem_values, (ny, nx))]
+    
+    # Combine results
+    for result in results:
+        heatmap += result
+    
+    # Normalize by area
+    mask = area_map > 0
+    heatmap[mask] /= area_map[mask]
+    
+    return heatmap
+
+
+def _process_weights_chunk_arb(weight_chunk, elem_values, grid_shape):
+    """Process a chunk of weights to calculate heatmap contributions."""
+    chunk_heatmap = np.zeros(grid_shape)
+    for e_idx, j, i, weight in weight_chunk:
+        if j < grid_shape[0] and i < grid_shape[1]:
+            chunk_heatmap[j, i] += elem_values[e_idx] * weight
+    return chunk_heatmap
+
+
+# ----------------------------
+# Combined function for backward compatibility
 # ----------------------------
 
 def tri2arb(nodes, elem, field_at_nodes,
-                                        grid_x=None, grid_y=None, grid_size=100,
-                                        elem_area=None):
+            grid_x=None, grid_y=None, grid_size=100,
+            elem_area=None, n_processes=None):
     """
     Conservative interpolation from triangular mesh to (possibly non-uniform) structured grid.
 
@@ -82,49 +251,21 @@ def tri2arb(nodes, elem, field_at_nodes,
         Non-uniform grid axes (cell boundaries).
     elem_area : (elem_n,) array, optional
         Precomputed element areas.
+    n_processes : int, optional
+        Number of processes for parallelization.
 
     Returns
     -------
     grid_x, grid_y, heatmap
     """
-    node_coords = nodes.T       # shape (nod_n, 2)
-    elem_conn = elem.T          # shape (elem_n, 3)
-
-    elem_values = np.array([field_at_nodes[tri].mean() for tri in elem_conn], dtype=float)
-
-    if grid_x is None:
-        grid_x = np.linspace(node_coords[:,0].min(), node_coords[:,0].max(), grid_size)
-    if grid_y is None:
-        grid_y = np.linspace(node_coords[:,1].min(), node_coords[:,1].max(), grid_size)
-
-    grid_x, dx_min = _prepare_axis(grid_x, "grid_x")
-    grid_y, dy_min = _prepare_axis(grid_y, "grid_y")
-    target_cell_size = min(dx_min, dy_min)
-
-    nx = len(grid_x) - 1
-    ny = len(grid_y) - 1
-    heatmap = np.zeros((ny, nx), dtype=float)
-    area_map = np.zeros((ny, nx), dtype=float)
-
-    for e_idx, tri_idx in enumerate(elem_conn):
-        tri_vertices = node_coords[tri_idx]
-        value = elem_values[e_idx]
-        A = elem_area[e_idx] if elem_area is not None else triangle_area(tri_vertices)
-
-        k = compute_required_subdivisions(tri_vertices, target_cell_size)
-        centroids = subdivide_triangle_iterative(tri_vertices, k)
-        sub_area = A / max(len(centroids), 1)
-
-        for (x, y) in centroids:
-            i = np.searchsorted(grid_x, x, side='right') - 1
-            j = np.searchsorted(grid_y, y, side='right') - 1
-            if 0 <= i < nx and 0 <= j < ny:
-                heatmap[j, i] += value * sub_area
-                area_map[j, i] += sub_area
-
-    mask = area_map > 0
-    heatmap[mask] /= area_map[mask]
-
+    # Calculate weights
+    weights, grid_x, grid_y, area_map = calculate_interpolation_weights_arb(
+        nodes, elem, grid_x, grid_y, grid_size, elem_area, n_processes)
+    
+    # Apply weights
+    heatmap = apply_interpolation_weights_arb(
+        weights, area_map, elem.T, field_at_nodes, n_processes)
+    
     return grid_x, grid_y, heatmap
 
 
@@ -160,7 +301,8 @@ if __name__ == "__main__":
     gx, gy, H = tri2arb(
         nodes, elem, field_at_nodes,
         grid_x=grid_x, grid_y=grid_y,
-        elem_area=elem_area
+        elem_area=elem_area,
+        n_processes=4  # Use 4 processes
     )
 
     # --- Plot ---

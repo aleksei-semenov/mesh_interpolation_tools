@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 from scipy.spatial import Delaunay
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # --------------------------------
 # Geometry helpers
@@ -66,20 +68,167 @@ def point_in_triangle(pt, tri):
     v = (dot00 * dot12 - dot01 * dot02) * invDenom
     return (u >= 0) and (v >= 0) and (u + v <= 1)
 
-def interpolate_from_source(pt, nodes_src, elem_src, elem_values):
+def interpolate_from_source(pt, source_triangles, source_values):
     """Find which source triangle contains pt and return its value."""
-    for e_idx, tri_idx in enumerate(elem_src.T):
-        tri = nodes_src[:, tri_idx].T
+    for i, tri in enumerate(source_triangles):
         if point_in_triangle(pt, tri):
-            return elem_values[e_idx]
+            return source_values[i]
     return np.nan  # outside domain
 
 # --------------------------------
-# Interpolator: triangle-to-triangle
+# Weight calculation for triangle-to-triangle interpolation
 # --------------------------------
+
+def calculate_tri2tri_weights(nodes_src, elem_src, nodes_tgt, elem_tgt, 
+                             k_subdivide=3, n_processes=None):
+    """
+    Calculate interpolation weights from source triangular mesh to target triangular mesh.
+    
+    Parameters
+    ----------
+    nodes_src : (2, Nsrc) array
+    elem_src  : (3, Msrc) array
+    nodes_tgt : (2, Ntgt) array
+    elem_tgt  : (3, Mtgt) array
+    k_subdivide : int
+        Number of subdivisions for each target triangle
+    n_processes : int, optional
+        Number of processes for parallelization
+        
+    Returns
+    -------
+    weights : list of tuples
+        Each tuple contains (target_element_index, source_element_index, weight)
+    target_areas : array
+        Area of each target element
+    """
+    # Precompute source triangles and their values
+    source_triangles = [nodes_src[:, tri].T for tri in elem_src.T]
+    
+    # Precompute target triangles and their areas
+    target_triangles = [nodes_tgt[:, tri].T for tri in elem_tgt.T]
+    target_areas = np.array([triangle_area(tri) for tri in target_triangles])
+    
+    # Prepare arguments for parallel processing
+    target_args = [(e_idx, tri_vertices, source_triangles, k_subdivide, target_areas[e_idx]) 
+                  for e_idx, tri_vertices in enumerate(target_triangles)]
+    
+    # Determine number of processes
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(target_args))
+    
+    # Process target elements in parallel
+    weights = []
+    if n_processes > 1:
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(_process_target_element_weights, target_args)
+    else:
+        # Serial processing
+        results = map(_process_target_element_weights, target_args)
+    
+    # Combine results
+    for result in results:
+        weights.extend(result)
+    
+    return weights, target_areas
+
+def _process_target_element_weights(args):
+    """Process a single target element to calculate interpolation weights."""
+    e_idx, tri_vertices, source_triangles, k_subdivide, target_area = args
+    element_weights = []
+    
+    # Subdivide target triangle into smaller centroids
+    centroids = subdivide_triangle_iterative(tri_vertices, k_subdivide)
+    sub_area = target_area / len(centroids)
+    
+    for c in centroids:
+        # Find which source triangle contains this centroid
+        for src_idx, src_tri in enumerate(source_triangles):
+            if point_in_triangle(c, src_tri):
+                element_weights.append((e_idx, src_idx, sub_area))
+                break
+    
+    return element_weights
+
+# --------------------------------
+# Interpolation function for triangle-to-triangle
+# --------------------------------
+
+def apply_tri2tri_weights(weights, source_values, target_areas, n_processes=None):
+    """
+    Apply precomputed interpolation weights to interpolate field values.
+    
+    Parameters
+    ----------
+    weights : list of tuples
+        Precomputed weights from calculate_tri2tri_weights
+    source_values : array
+        Values for each source element
+    target_areas : array
+        Area of each target element
+    n_processes : int, optional
+        Number of processes for parallelization
+        
+    Returns
+    -------
+    field_tgt : array
+        Interpolated values for target elements
+    """
+    n_target = len(target_areas)
+    field_tgt = np.zeros(n_target)
+    area_covered = np.zeros(n_target)
+    
+    # Process weights in parallel
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(weights))
+    
+    if n_processes > 1:
+        # Split weights into chunks for parallel processing
+        chunk_size = len(weights) // n_processes + 1
+        weight_chunks = [weights[i:i+chunk_size] for i in range(0, len(weights), chunk_size)]
+        
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(partial(_process_tri2tri_weights_chunk, 
+                                     source_values=source_values, 
+                                     n_target=n_target), 
+                             weight_chunks)
+    else:
+        # Serial processing
+        results = [_process_tri2tri_weights_chunk(weights, source_values, n_target)]
+    
+    # Combine results
+    for result in results:
+        field_tgt_chunk, area_chunk = result
+        field_tgt += field_tgt_chunk
+        area_covered += area_chunk
+    
+    # Normalize by area covered
+    mask = area_covered > 0
+    field_tgt[mask] /= area_covered[mask]
+    field_tgt[~mask] = np.nan
+    
+    return field_tgt
+
+def _process_tri2tri_weights_chunk(weight_chunk, source_values, n_target):
+    """Process a chunk of weights to calculate target field contributions."""
+    field_tgt_chunk = np.zeros(n_target)
+    area_chunk = np.zeros(n_target)
+    
+    for tgt_idx, src_idx, weight in weight_chunk:
+        field_tgt_chunk[tgt_idx] += source_values[src_idx] * weight
+        area_chunk[tgt_idx] += weight
+    
+    return field_tgt_chunk, area_chunk
+
+# --------------------------------
+# Combined function for triangle-to-triangle interpolation
+# --------------------------------
+
 def conservative_interp_tri2tri(nodes_src, elem_src, field_src,
                                 nodes_tgt, elem_tgt,
-                                k_subdivide=3):
+                                k_subdivide=3, n_processes=None):
     """
     Conservative interpolation from source triangular mesh to target triangular mesh.
     
@@ -90,42 +239,27 @@ def conservative_interp_tri2tri(nodes_src, elem_src, field_src,
     field_src : (Nsrc,) array
     nodes_tgt : (2, Ntgt) array
     elem_tgt  : (3, Mtgt) array
-    
+    k_subdivide : int
+        Number of subdivisions for each target triangle
+    n_processes : int, optional
+        Number of processes for parallelization
+        
     Returns
     -------
     field_tgt : (Mtgt,) array of interpolated values per target triangle
     """
-    nodes_src = nodes_src
-    nodes_tgt = nodes_tgt
-    elem_src = elem_src
-    elem_tgt = elem_tgt
-
-    # Assign mean value to each source element
-    elem_values_src = np.array([field_src[tri].mean() for tri in elem_src.T])
-
-    field_tgt = np.zeros(elem_tgt.shape[1])
-
-    for e_idx, tri_idx in enumerate(elem_tgt.T):
-        tri_vertices = nodes_tgt[:, tri_idx].T
-        A = triangle_area(tri_vertices)
-
-        # Subdivide target triangle into smaller centroids
-        centroids = subdivide_triangle_iterative(tri_vertices, k_subdivide)
-        sub_area = A / len(centroids)
-
-        val_sum = 0.0
-        area_sum = 0.0
-
-        for c in centroids:
-            val = interpolate_from_source(c, nodes_src, elem_src, elem_values_src)
-            if not np.isnan(val):
-                val_sum += val * sub_area
-                area_sum += sub_area
-
-        field_tgt[e_idx] = val_sum / area_sum if area_sum > 0 else np.nan
-
+    # Precompute source element values
+    source_values = np.array([field_src[tri].mean() for tri in elem_src.T])
+    
+    # Calculate weights
+    weights, target_areas = calculate_tri2tri_weights(
+        nodes_src, elem_src, nodes_tgt, elem_tgt, k_subdivide, n_processes)
+    
+    # Apply weights
+    field_tgt = apply_tri2tri_weights(
+        weights, source_values, target_areas, n_processes)
+    
     return field_tgt
-
 
 # --------------------------------
 # Example usage
@@ -149,9 +283,10 @@ if __name__ == "__main__":
     x, y = nodes_src
     field_src = np.sin(2*np.pi*x) * np.cos(2*np.pi*y)
 
-    # Interpolate
+    # Interpolate with parallel processing
     field_tgt = conservative_interp_tri2tri(nodes_src, elem_src, field_src,
-                                            nodes_tgt, elem_tgt, k_subdivide=3)
+                                            nodes_tgt, elem_tgt, 
+                                            k_subdivide=3, n_processes=4)
 
     # Plot
     plt.figure(figsize=(12,5))

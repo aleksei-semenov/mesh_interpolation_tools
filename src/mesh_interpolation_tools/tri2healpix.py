@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import math
 import healpy as hp
 from scipy.spatial import SphericalVoronoi, geometric_slerp
+from multiprocessing import Pool, cpu_count
+from functools import partial
+import time
 
 # --------------------------------
 # Spherical geometry helpers
@@ -88,14 +91,6 @@ def point_in_spherical_triangle(pt, tri):
     
     return (u >= 0) and (v >= 0) and (u + v <= 1)
 
-def interpolate_from_spherical_source(pt, nodes_src, elem_src, elem_values):
-    """Find which source spherical triangle contains pt and return its value."""
-    for e_idx, tri_idx in enumerate(elem_src.T):
-        tri = nodes_src[:, tri_idx].T
-        if point_in_spherical_triangle(pt, tri):
-            return elem_values[e_idx]
-    return np.nan  # outside domain
-
 # --------------------------------
 # Spherical mesh generation
 # --------------------------------
@@ -134,9 +129,168 @@ def generate_spherical_triangular_mesh(n_points):
     return nodes, elem_src
 
 # --------------------------------
-# Interpolator: spherical triangle to HEALPix
+# Weight calculation and interpolation functions
 # --------------------------------
-def conservative_interp_spherical_tri2healpix(nodes_src, elem_src, field_src, nside, k_subdivide=3):
+
+def _process_element_weights(args):
+    """Process a single element to calculate interpolation weights."""
+    e_idx, tri_idx, nodes_src, elem_area, nside, k_subdivide = args
+    tri_vertices = nodes_src[:, tri_idx].T
+    A = elem_area[e_idx]
+    
+    # Subdivide the triangle
+    centroids = subdivide_spherical_triangle(tri_vertices, k_subdivide)
+    sub_area = A / len(centroids) if centroids else 0
+    
+    element_weights = []
+    for c in centroids:
+        # Convert centroid to spherical coordinates
+        x, y, z = c
+        theta = np.arccos(z)
+        phi = np.arctan2(y, x)
+        if phi < 0:
+            phi += 2 * np.pi
+            
+        # Find the HEALPix pixel index
+        pix_idx = hp.ang2pix(nside, theta, phi)
+        element_weights.append((pix_idx, sub_area))
+            
+    return e_idx, element_weights
+
+def calculate_spherical_weights(nodes_src, elem_src, nside, k_subdivide=3, n_processes=None):
+    """
+    Calculate interpolation weights from spherical triangular mesh to HEALPix grid.
+    
+    Parameters
+    ----------
+    nodes_src : (3, Nsrc) array
+        Cartesian coordinates of source mesh nodes (on unit sphere)
+    elem_src  : (3, Msrc) array
+        Indices of triangles in source mesh
+    nside : int
+        HEALPix NSIDE parameter
+    k_subdivide : int
+        Number of subdivisions for each source triangle
+    n_processes : int, optional
+        Number of processes for parallelization. Defaults to CPU count.
+        
+    Returns
+    -------
+    weights : list of tuples
+        Each tuple contains (element_index, list of (pixel_index, weight))
+    area_map : array
+        Total area in each HEALPix pixel
+    """
+    npix = hp.nside2npix(nside)
+    
+    # Calculate element areas
+    elem_area = np.zeros(elem_src.shape[1])
+    for e_idx, tri_idx in enumerate(elem_src.T):
+        tri_vertices = nodes_src[:, tri_idx].T
+        elem_area[e_idx] = spherical_triangle_area(tri_vertices)
+    
+    # Prepare arguments for parallel processing
+    element_args = [(e_idx, tri_idx, nodes_src, elem_area, nside, k_subdivide) 
+                    for e_idx, tri_idx in enumerate(elem_src.T)]
+    
+    # Determine number of processes
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(element_args))
+    
+    # Initialize area map
+    area_map = np.zeros(npix)
+    
+    # Process elements in parallel
+    weights = []
+    if n_processes > 1:
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(_process_element_weights, element_args)
+    else:
+        # Serial processing
+        results = map(_process_element_weights, element_args)
+    
+    # Process results
+    for e_idx, element_weights in results:
+        weights.append((e_idx, element_weights))
+        for pix_idx, weight in element_weights:
+            area_map[pix_idx] += weight
+    
+    return weights, area_map
+
+def _process_weights_chunk(weight_chunk, elem_values):
+    """Process a chunk of weights to calculate HEALPix map contributions."""
+    npix = len(elem_values) if hasattr(elem_values, 'shape') else hp.nside2npix(256)  # Default fallback
+    chunk_healpix = np.zeros(npix)
+    
+    for e_idx, element_weights in weight_chunk:
+        for pix_idx, weight in element_weights:
+            if pix_idx < npix:
+                chunk_healpix[pix_idx] += elem_values[e_idx] * weight
+            
+    return chunk_healpix
+
+def apply_spherical_weights(weights, area_map, elem_src, field_src, n_processes=None):
+    """
+    Apply precomputed interpolation weights to interpolate field values.
+    
+    Parameters
+    ----------
+    weights : list of tuples
+        Precomputed weights from calculate_spherical_weights
+    area_map : array
+        Total area in each HEALPix pixel
+    elem_src : array
+        Element connectivity
+    field_src : array
+        Field values at source nodes
+    n_processes : int, optional
+        Number of processes for parallelization. Defaults to CPU count.
+        
+    Returns
+    -------
+    healpix_map : array
+        Interpolated field values on the HEALPix grid
+    """
+    npix = len(area_map)
+    
+    # Precompute element values
+    elem_values = np.array([field_src[tri].mean() for tri in elem_src.T], dtype=float)
+    
+    # Determine number of processes
+    if n_processes is None:
+        n_processes = cpu_count()
+    n_processes = min(n_processes, len(weights))
+    
+    # Process weights in parallel
+    healpix_map = np.zeros(npix)
+    if n_processes > 1:
+        # Split weights into chunks for parallel processing
+        chunk_size = len(weights) // n_processes + 1
+        weight_chunks = [weights[i:i+chunk_size] for i in range(0, len(weights), chunk_size)]
+        
+        with Pool(processes=n_processes) as pool:
+            results = pool.map(partial(_process_weights_chunk, elem_values=elem_values), weight_chunks)
+    else:
+        # Serial processing
+        results = [_process_weights_chunk(weights, elem_values)]
+    
+    # Combine results
+    for result in results:
+        healpix_map += result
+    
+    # Normalize by area
+    mask = area_map > 0
+    healpix_map[mask] /= area_map[mask]
+    healpix_map[~mask] = np.nan  # Mark pixels with no data
+    
+    return healpix_map
+
+# --------------------------------
+# Combined function for backward compatibility
+# --------------------------------
+
+def conservative_interp_spherical_tri2healpix(nodes_src, elem_src, field_src, nside, k_subdivide=3, n_processes=None):
     """
     Conservative interpolation from source spherical triangular mesh to HEALPix grid.
     
@@ -152,52 +306,20 @@ def conservative_interp_spherical_tri2healpix(nodes_src, elem_src, field_src, ns
         HEALPix NSIDE parameter
     k_subdivide : int
         Number of subdivisions for each source triangle
-    
+    n_processes : int, optional
+        Number of processes for parallelization. Defaults to CPU count.
+        
     Returns
     -------
     healpix_map : (Npix,) array of interpolated values per HEALPix pixel
     """
-    # Calculate HEALPix pixel centers
-    npix = hp.nside2npix(nside)
+    # Calculate weights
+    weights, area_map = calculate_spherical_weights(
+        nodes_src, elem_src, nside, k_subdivide, n_processes)
     
-    # Assign mean value to each source element
-    elem_values_src = np.array([field_src[tri].mean() for tri in elem_src.T])
-    
-    # Initialize output map
-    healpix_map = np.zeros(npix)
-    healpix_weights = np.zeros(npix)  # For area weighting
-    
-    # For each source triangle
-    for e_idx, tri_idx in enumerate(elem_src.T):
-        tri_vertices = nodes_src[:, tri_idx].T
-        
-        # Calculate area of source triangle
-        A = spherical_triangle_area(tri_vertices)
-        
-        # Subdivide source triangle into smaller centroids
-        centroids = subdivide_spherical_triangle(tri_vertices, k_subdivide)
-        sub_area = A / len(centroids)
-        
-        # For each centroid, find which HEALPix pixel it falls into
-        for c in centroids:
-            # Convert centroid to spherical coordinates
-            x, y, z = c
-            theta = np.arccos(z)
-            phi = np.arctan2(y, x)
-            if phi < 0:
-                phi += 2 * np.pi
-                
-            # Find the HEALPix pixel index
-            pix_idx = hp.ang2pix(nside, theta, phi)
-            
-            # Add weighted value to this pixel
-            healpix_map[pix_idx] += elem_values_src[e_idx] * sub_area
-            healpix_weights[pix_idx] += sub_area
-    
-    # Normalize by the total area in each pixel
-    nonzero_weights = healpix_weights > 0
-    healpix_map[nonzero_weights] /= healpix_weights[nonzero_weights]
-    healpix_map[~nonzero_weights] = np.nan  # Mark pixels with no data
+    # Apply weights
+    healpix_map = apply_spherical_weights(
+        weights, area_map, elem_src, field_src, n_processes)
     
     return healpix_map
 
@@ -218,16 +340,38 @@ if __name__ == "__main__":
     nside = 16
     npix = hp.nside2npix(nside)
     
-    # Interpolate from spherical triangles to HEALPix
-    healpix_map = conservative_interp_spherical_tri2healpix(
-        nodes_src, elem_src, field_src, nside, k_subdivide=2  # Reduced subdivisions for speed
+    # Time the weight calculation
+    start_time = time.time()
+    weights, area_map = calculate_spherical_weights(
+        nodes_src, elem_src, nside, k_subdivide=2, n_processes=4
     )
+    weight_time = time.time() - start_time
+    print(f"Weight calculation time: {weight_time:.3f} seconds")
+    
+    # Time the interpolation
+    start_time = time.time()
+    healpix_map = apply_spherical_weights(
+        weights, area_map, elem_src, field_src, n_processes=4
+    )
+    interp_time = time.time() - start_time
+    print(f"Interpolation time: {interp_time:.3f} seconds")
+    
+    # Compare with direct method
+    start_time = time.time()
+    healpix_map_direct = conservative_interp_spherical_tri2healpix(
+        nodes_src, elem_src, field_src, nside, k_subdivide=2, n_processes=4
+    )
+    direct_time = time.time() - start_time
+    print(f"Direct method time: {direct_time:.3f} seconds")
+    
+    # Verify results are the same
+    print(f"Results match: {np.allclose(healpix_map, healpix_map_direct, equal_nan=True)}")
     
     # Plot results
     plt.figure(figsize=(15, 5))
     
     # Plot HEALPix map
-    hp.mollview(healpix_map, title="Interpolated HEALPix map", sub=(1, 3, 1))
+    hp.mollview(healpix_map, title="Interpolated HEALPix map (with weights)", sub=(1, 3, 1))
     
     # For the source mesh, we need to convert to spherical coordinates and plot
     theta = np.arccos(z)
@@ -240,15 +384,12 @@ if __name__ == "__main__":
     ax.set_title("Source spherical mesh")
     
     # Plot the difference (for validation)
-    # For this, we need to interpolate back to the source points
-    theta_src = np.arccos(z)
-    phi_src = np.arctan2(y, x)
-    pix_idx_src = hp.ang2pix(nside, theta_src, phi_src)
+    pix_idx_src = hp.ang2pix(nside, theta, phi)
     field_interp = healpix_map[pix_idx_src]
     
     ax = plt.subplot(1, 3, 3, projection='mollweide')
     diff = field_src - field_interp
-    sc = ax.scatter(phi_src, np.pi/2 - theta_src, c=diff, s=5, cmap='RdBu_r')
+    sc = ax.scatter(phi, np.pi/2 - theta, c=diff, s=5, cmap='RdBu_r')
     plt.colorbar(sc, ax=ax)
     ax.set_title("Difference (source - interpolated)")
     
