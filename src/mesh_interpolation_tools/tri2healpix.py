@@ -218,9 +218,8 @@ def calculate_spherical_weights(nodes_src, elem_src, nside, k_subdivide=3, n_pro
     
     return weights, area_map
 
-def _process_weights_chunk(weight_chunk, elem_values):
+def _process_weights_chunk(weight_chunk, elem_values, npix):
     """Process a chunk of weights to calculate HEALPix map contributions."""
-    npix = len(elem_values) if hasattr(elem_values, 'shape') else hp.nside2npix(256)  # Default fallback
     chunk_healpix = np.zeros(npix)
     
     for e_idx, element_weights in weight_chunk:
@@ -270,10 +269,13 @@ def apply_spherical_weights(weights, area_map, elem_src, field_src, n_processes=
         weight_chunks = [weights[i:i+chunk_size] for i in range(0, len(weights), chunk_size)]
         
         with Pool(processes=n_processes) as pool:
-            results = pool.map(partial(_process_weights_chunk, elem_values=elem_values), weight_chunks)
+            results = pool.map(partial(_process_weights_chunk, 
+                                     elem_values=elem_values, 
+                                     npix=npix), 
+                             weight_chunks)
     else:
         # Serial processing
-        results = [_process_weights_chunk(weights, elem_values)]
+        results = [_process_weights_chunk(weights, elem_values, npix)]
     
     # Combine results
     for result in results:
