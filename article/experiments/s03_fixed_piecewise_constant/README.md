@@ -18,17 +18,19 @@ the correct remap of the *same* source?
 
 ## Status
 
+All data is produced by `../s01_benchmark_setup/run_benchmark.py` with the **package's
+weights**, in `../s01_benchmark_setup/results/`.
+
 | Item | Where | Status |
 |------|-------|--------|
-| fixed field, overlap reference, errors per k | `suites/constant_geometry_benchmarks` (`diagnostics.csv`, `fields_k*.npz`) | done |
-| panel A | partly in `constant_convergence.pdf` | check whether it suffices |
+| fixed field, overlap reference, errors per k | `diagnostics.csv` (`field == fixed`), `fields_k*.npz` (`field_W`, `field_A`), `mesh_reference.npz` (`q_reference`) | **done, package weights** |
+| panel A | Fig. 2 (d) in §2 | done |
 | panel B, slope | only `adjacent_rates.csv` | **open** |
-| panel C, runtime vs error | timings are saved; no plot | **open** |
-| error map | `fields_k*.npz` holds the data; no plot | **open** |
+| panel C, runtime vs error | package time in `weight_build_seconds`, overlap time in `metadata.json` (`reference_seconds`); not plotted | **open** |
+| error map | `fields_k*.npz` holds the data; not plotted | **open** |
 | assigned vs exact areas in cut cells | `boundary_cell_areas.csv` | done |
 
 ## Open work, belongs here
 
-- [ ] `fig3_geometric_convergence.py`: reads the suite's results directory
-      (`diagnostics.csv`, `fields_k*.npz`, `metadata.json`) and draws panels A–C plus the error map.
-- [ ] Measure runtime consistently for the package path and the overlap reference.
+- [ ] `plot_fig3.py`: reads `../s01_benchmark_setup/results/` and draws panels A–C plus the error map.
+- [ ] Decide whether panel A stays in Fig. 2 (d) or moves into Fig. 3.

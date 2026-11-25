@@ -11,27 +11,27 @@ and min/max W/A.
 
 ## Figures
 
-- **Fig. 1** (coarse and fine k): A = map of d, B = q−1 (W), C = q−1 (A).
-  Use diverging colours centred at 0, mark undefined cells, and match colour limits across k.
-- **Fig. 2** vs k: A = |ε_M| per normalization, B = max constant error,
-  C = unsampled area fraction. Use log y-axes and show exact zeros separately.
+- **Fig. 1** `area_diagnostics.pdf`. Rows are a coarse and a fine k; columns are
+  the map of d, q−1 (W) and q−1 (A). Colours are diverging and centred at 0, undefined
+  cells are gray, and colour limits match across k.
+- **Fig. 2** `constant_convergence.pdf`, panels vs k:
+  - (a) |ε_M| for each normalization
+  - (b) maximum constant error
+  - (c) unsampled area fraction
+  - (d) fixed-field E1/E2/E∞, which is §3 Fig. 3A
 
-## Status
+  Log y-axes; exact zeros and unavailable values appear in a status strip.
+
+## Code and status
 
 | Item | Where | Status |
 |------|-------|--------|
-| Fig. 1 | `suites/constant_geometry_benchmarks` → `area_diagnostics.pdf` | done |
-| Fig. 2 | `suites/constant_geometry_benchmarks` → `constant_convergence.pdf` | done |
-| diagnostic table | `diagnostics_table.tex` | done |
-| run at protocol sizes | – | open |
-
-Run (from `../suites/constant_geometry_benchmarks`):
+| data | `../s01_benchmark_setup/run_benchmark.py` → `../s01_benchmark_setup/results/` | **done, package weights** |
+| Fig. 1, Fig. 2 | `plot_fig1_fig2.py` → `results/` | **done** |
+| diagnostic table | `../s01_benchmark_setup/results/diagnostics_table.tex` | done |
+| protocol sizes | – | open: rerun §1 with `--source-n 32 --target-n 32 --k 0 … 6` |
 
 ```bash
-python run_benchmarks.py --source-n 32 --target-n 41 --k 0 1 2 3 4 5 6 --out ../../s02_constant_field/results
-python plot_benchmarks.py --out ../../s02_constant_field/results
+python -m article.experiments.s01_benchmark_setup.run_benchmark
+python -m article.experiments.s02_constant_field.plot_fig1_fig2 [--map-k 0 5]
 ```
-
-## Open work, belongs here
-
-- [ ] Rerun Figs. 1–2 with W taken from the package (see §1).

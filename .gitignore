@@ -11,3 +11,4 @@ venv/
 
 # article experiment outputs (regenerate with: python -m article run all)
 article/figures/
+article/experiments/*/results/

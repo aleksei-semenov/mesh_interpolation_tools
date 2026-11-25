@@ -6,33 +6,48 @@ Spec: [Experiment List.md](../Experiment%20List.md), section 6.
 
 Using the smooth field, refine one thing at a time:
 
-- **A**: subdivision k, with both meshes fixed
-- **B**: source lattice 16/32/64/128, on a fine target with k large enough
-- **C**: target grid 16/32/64/128, on a fixed source
+- **A**: subdivision k, with both meshes fixed. This is the §4 run.
+- **B**: source lattice size, on a fixed target at depth `--refine-k`.
+- **C**: target grid size, on a fixed source at depth `--refine-k`.
 
 ## Figure 6
 
-- A: geometric E2 vs 2^-k
-- B: total E2 vs h_S, one curve per reconstruction
-- C: geometric E2 vs h_T, one curve per fixed k
+`fig6_refinement_<field>.pdf`:
+- A: geometric E2 vs 2^-k, read from §4 results
+- B: total E2 vs h_S
+- C: geometric E2 vs h_T
 
-Slope guides are guides only.
+Colours mark the reconstruction; ○/solid = W and □/dashed = A. Circled points in B
+have geometric error ≥ 10 % of total error.
+
+## Code
+
+| File | Role |
+|------|------|
+| `run_refinement.py` | sweeps B and C with `s04_smooth_field.smooth.smooth_group` (package-based) → `results/refinement_diagnostics.csv` |
+| `plot_fig6.py` | Figure 6; panel A uses `--subdivision-data` (default: §4 results) |
+
+```bash
+python -m article.experiments.s04_smooth_field.run_smooth          # needed for panel A
+python -m article.experiments.s06_independent_refinement.run_refinement
+python -m article.experiments.s06_independent_refinement.plot_fig6
+```
 
 ## Status
 
-| Item | Where | Status |
-|------|-------|--------|
-| sweeps A–C and figure | `suites/smooth_robustness_benchmarks` → `smooth_refinement_*.pdf` | done |
-| flag where geometric error contaminates source sweep | same (circled points, 10 % threshold) | done |
-| protocol sizes 16–128 | defaults are 5/8/12 and 6/11/16 | **open**: needs larger runs |
+| Item | Status |
+|------|--------|
+| sweeps A–C and Figure 6 | **done, package-based** (demo: source 5/8/12, target 6/11/16, k = 4) |
+| contamination flag on the source sweep | done |
+| protocol sizes 16–128 | **open** |
 
-Example for a larger run (memory grows ~ N·4^k, so start small):
+Larger example (memory grows ~ N·4^k; see ../README.md):
 
 ```bash
-python run_benchmarks.py --source-n 32 --target-n 32 --source-sweep 16 32 64 \
-  --target-sweep 16 32 64 --k 0 1 2 3 4 5 --refine-k 5 --out ../../s06_independent_refinement/results
+python -m article.experiments.s06_independent_refinement.run_refinement \
+  --source-n 32 --target-n 32 --source-sweep 16 32 64 --target-sweep 16 32 64 --refine-k 5
 ```
 
-## Open work, belongs here
+## Open work
 
-- [ ] Production-size runs, possibly split per sweep so that each fits in memory.
+- [ ] Production-size runs, possibly one sweep and field at a time (`--fields sine`).

@@ -36,9 +36,10 @@ flag, so you can always tell which version of the algorithms produced it.
 ## Layout of `experiments/`
 
 `experiments/` follows the protocol in `experiments/Experiment List.md`. There is one
-folder `sNN_*` per section, plus `suites/` with the existing benchmark bundles.
-[experiments/README.md](experiments/README.md) has the status table: what is done,
-what is open, and which code each result actually uses.
+folder `sNN_*` per section, each with its code, README and `results/`. The method
+always comes from the package (see `s01_benchmark_setup/package_sampling.py`).
+[experiments/README.md](experiments/README.md) has the status table and the commands
+to regenerate every figure.
 
 ## Adding a quick experiment (runner-discoverable)
 

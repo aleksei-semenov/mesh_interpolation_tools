@@ -1,7 +1,0 @@
-field,reconstruction,normalization,requested_k_start,requested_k_end,used_depths,n,fitted_geometric_E2_order
-sine,constant,W,1,4,1;2;3;4,4,1.4911677640663354
-sine,constant,A,1,4,1;2;3;4,4,1.423218825443607
-sine,linear,W,1,4,1;2;3;4,4,1.4459696855865043
-sine,linear,A,1,4,1;2;3;4,4,1.4189729583057542
-sine,quadratic,W,1,4,1;2;3;4,4,1.4041674467424643
-sine,quadratic,A,1,4,1;2;3;4,4,1.5053149459657533
