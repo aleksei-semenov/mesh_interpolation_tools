@@ -1,0 +1,4 @@
+numpy
+scipy
+matplotlib
+# optional: healpy (HEALPix, Linux/macOS), jax (JAX HEALPix)

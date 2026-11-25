@@ -1,26 +1,50 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mesh-interpolation-tools"
 version = "0.1.0"
-description = "Conservative interpolation between triangular meshes and structured grids"
-authors = [
-    { name="Aleksei Semenov", email="aleksei.semenov@awi.de" }
-]
+description = "Conservative interpolation between triangular meshes, structured grids and HEALPix"
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Aleksei Semenov", email = "aleksei.semenov@awi.de" },
+]
+requires-python = ">=3.9"
+keywords = ["interpolation", "conservative remapping", "triangular mesh", "HEALPix", "FESOM", "climate"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 
+# Core dependencies: enough for tri2reg, tri2arb and tri2tri.
 dependencies = [
     "numpy",
     "scipy",
     "matplotlib",
 ]
 
+[project.optional-dependencies]
+# HEALPix interpolation (healpy has no Windows wheels; use Linux/macOS/WSL).
+healpix = ["healpy"]
+# JAX-accelerated HEALPix interpolation.
+jax = ["healpy", "jax"]
+dev = ["pytest", "build", "twine"]
+all = ["healpy", "jax"]
+
 [project.urls]
-Homepage = "https://github.com/"
+Homepage = "https://github.com/aleksei-semenov/mesh_interpolation_tools"
+Repository = "https://github.com/aleksei-semenov/mesh_interpolation_tools"
+Issues = "https://github.com/aleksei-semenov/mesh_interpolation_tools/issues"
 
 [tool.setuptools.packages.find]
-include = ["mesh_interpolation_tools", "mesh_interpolation_tools.*"]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

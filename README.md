@@ -18,17 +18,40 @@ All methods conserve integrals of the interpolated field.
 
 ## Installation
 
-Clone the repository and install locally:
+Install directly from GitHub:
+
+```bash
+pip install "git+https://github.com/aleksei-semenov/mesh_interpolation_tools.git"
+```
+
+Optional extras:
+
+```bash
+pip install "mesh-interpolation-tools[healpix] @ git+https://github.com/aleksei-semenov/mesh_interpolation_tools.git"  # HEALPix (healpy)
+pip install "mesh-interpolation-tools[jax] @ git+https://github.com/aleksei-semenov/mesh_interpolation_tools.git"      # + JAX version
+```
+
+> `healpy` provides no Windows wheels — use Linux, macOS or WSL for HEALPix interpolation.
+> The 2D tools (`tri2reg`, `tri2arb`, `tri2tri`) work everywhere.
+
+For development (editable install):
 
 ```bash
 git clone https://github.com/aleksei-semenov/mesh_interpolation_tools.git
 cd mesh_interpolation_tools
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-This uses the `src/` layout, so the package is found correctly.
+### Building and publishing
 
-Dependencies are listed in `requirements.txt` and will be installed automatically.
+```bash
+python -m build          # creates dist/*.whl and dist/*.tar.gz
+twine check dist/*
+twine upload --repository testpypi dist/*   # try TestPyPI first
+twine upload dist/*                          # then real PyPI
+```
+
+After uploading to PyPI, users can simply `pip install mesh-interpolation-tools`.
 
 ---
 
@@ -107,7 +130,7 @@ jupyter notebook
 
 ## Tests
 
-Tests will be located in the `tests/` folder. To run:
+Smoke tests are in the `tests/` folder. To run:
 
 ```bash
 pytest
