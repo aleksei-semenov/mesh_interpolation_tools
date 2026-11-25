@@ -1,0 +1,7 @@
+field,reconstruction,normalization,requested_k_start,requested_k_end,used_depths,n,fitted_geometric_E2_order
+quadratic,constant,W,1,4,1;2;3;4,4,1.4047561927154515
+quadratic,constant,A,1,4,1;2;3;4,4,1.3911052101990136
+quadratic,linear,W,1,4,1;2;3;4,4,1.3548977350632492
+quadratic,linear,A,1,4,1;2;3;4,4,1.3933327099000465
+quadratic,quadratic,W,1,4,1;2;3;4,4,1.3798926721946485
+quadratic,quadratic,A,1,4,1;2;3;4,4,1.4854225477375973

@@ -8,3 +8,6 @@ dist/
 .ipynb_checkpoints/
 .venv/
 venv/
+
+# article experiment outputs (regenerate with: python -m article run all)
+article/figures/
